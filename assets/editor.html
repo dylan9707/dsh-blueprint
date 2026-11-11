@@ -1,847 +1,116 @@
-<!DOCTYPE html>
-<html lang="zh">
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>System View · 全景 + 信号流</title>
-<style>
-  html,body{margin:0;height:100%;font-family:'Segoe UI',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;overflow:hidden;}
-  body[data-theme="dark"]{background:#0B1220;}
-  body[data-theme="light"]{background:#eef0f3;}
-  #bar{height:44px;background:#111a2e;color:#e6edf3;display:flex;align-items:center;gap:6px;padding:0 12px;font-size:13px;}
-  #bar button{background:#1f2c45;border:1px solid #2b3b5a;color:#dbe4f0;padding:5px 10px;border-radius:6px;cursor:pointer;}
-  #bar button:hover{background:#2b3b5a;}
-  .tab{cursor:pointer;padding:5px 12px;border-radius:6px;color:#8b98a9;font-weight:bold;user-select:none;}
-  .tab.active{background:#2563eb;color:#fff;}
-  #bar .sep{width:1px;height:20px;background:#2b3b5a;}
-  #bar .sp{flex:1;}
-  #bar #hint{color:#8b98a9;font-size:11px;}
-  #bar #zoomlabel{color:#8b98a9;font-size:11px;min-width:40px;text-align:center;}
-  #inspector{display:none;color:#e6edf3;font-size:12px;white-space:nowrap;}
-  #inspector select,#inspector input{font-size:12px;padding:2px 4px;color:#111;background:#fff;border:1px solid #2b3b5a;border-radius:4px;}
-  #main{height:calc(100% - 44px);}
-  #canvas{width:100%;height:100%;cursor:grab;display:block;}
-  @keyframes flowDash{to{stroke-dashoffset:-24;}}
-  @keyframes nodeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint Canvas</title>
+  <link rel="stylesheet" href="/plugins/blueprint/styles.css">
 </head>
-<body data-theme="dark">
-<div id="bar">
-  <span id="tab-pano" class="tab active" onclick="setTab('pano')">全景</span>
-  <span id="tab-flow" class="tab" onclick="setTab('flow')">信号流</span>
-  <span class="sep"></span>
-  <button id="btnEdit" onclick="toggleEdit()">✏️ 编辑模式</button>
-  <span id="editHint" style="font-size:11px;color:#8b98a9;"></span>
-  <span class="sep"></span>
-  <button id="btnAdd" onclick="addNode()">+块</button>
-  <button id="btnSave" onclick="saveGraph()">保存</button>
-  <button id="btnLoad" onclick="loadGraph()">加载</button>
-  <button id="btnCopy" onclick="copyJson()">复制</button>
-  <button id="btnUpdate" onclick="updateAgent()" title="把当前图同步给 agent，出改动确认与设计 plan">Update Agent</button>
-  <span id="agentStatus" style="font-size:11px;color:#34d399;"></span>
-  <span class="sep"></span>
-  <button id="btnTheme" onclick="toggleTheme()" title="明暗主题切换">🌙 深色</button>
-  <button onclick="exportSVG()" title="导出矢量 SVG">导出 SVG</button>
-  <button onclick="exportPNG()" title="导出 2x 高清 PNG">导出 PNG</button>
-  <span class="sep"></span>
-  <button onclick="zoomIn()">+</button>
-  <button onclick="zoomOut()">-</button>
-  <button onclick="fitView()">适应</button>
-  <span id="zoomlabel">100%</span>
-  <span class="sp"></span>
-  <span id="hint">滚轮缩放 · 拖空白平移 · 拖块移动 · 右圆点连线 · 双击改名</span>
-  <span id="inspector">
-    类型 <select id="typeSel"></select>
-    标签 <input id="labelInp" size="14">
-    <button onclick="delSel()">删除</button>
-  </span>
-</div>
-<div id="main">
-  <svg id="canvas">
-    <defs id="defs"></defs>
-    <g id="world">
-      <g id="layer"></g>
-    </g>
-  </svg>
-</div>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">B</div>
+      <div>
+        <h1>Blueprint Canvas</h1>
+        <p id="sessionMeta">Loading local session…</p>
+      </div>
+    </div>
+    <div class="toolbar" aria-label="Blueprint actions">
+      <button id="addNode" class="primary">+ Block</button>
+      <button id="connectEdge">Connect</button>
+      <button id="deleteItem" disabled>Delete</button>
+      <span class="separator"></span>
+      <button id="save">Save</button>
+      <button id="updateAgent" class="agent">Update Agent</button>
+    </div>
+  </header>
 
-<script>
-var NODE_TYPES = ['process','control','sensor','actuator','data-store','external'];
-var EDGE_TYPES = ['signal','control','data'];
-var editing = false;   // 默认只读；点「编辑模式」才可改图
+  <section class="statusbar">
+    <span id="statusDot" class="status-dot"></span>
+    <span id="statusText">Loading…</span>
+    <span id="diffSummary" class="diff-summary"></span>
+  </section>
 
-// ============ 语义色板（archify 风格：深/浅各一套主色，rgb 用于派生半透明） ============
-var PANO_COLORS = {
-  cyan:   { dark:'#22D3EE', light:'#0891B2', rgb:'34,211,238' },
-  green:  { dark:'#34D399', light:'#059669', rgb:'52,211,153' },
-  blue:   { dark:'#60A5FA', light:'#2563EB', rgb:'96,165,250' },
-  purple: { dark:'#A78BFA', light:'#7C3AED', rgb:'167,139,250' },
-  orange: { dark:'#FBBF24', light:'#D97706', rgb:'251,191,36' },
-  rose:   { dark:'#F472B6', light:'#DB2777', rgb:'244,114,182' },
-  red:    { dark:'#F87171', light:'#DC2626', rgb:'248,113,113' },
-  gray:   { dark:'#94A3B8', light:'#4B5563', rgb:'148,163,184' }
-};
-var theme = 'dark';
-var THEME = {
-  dark: {
-    canvasBg:'#0B1220', dot:'rgba(148,163,184,0.10)',
-    text:'#E6EDF3', muted:'#8B98A9',
-    cardTop:0.14, cardBottom:0.04, cardBorder:0.45,
-    regionTop:0.06, regionBottom:0.015, regionBorder:0.35,
-    centerTop:0.22, centerBottom:0.05, centerBorder:0.7,
-    glowAlpha:0.30, chipAlpha:0.16, chipBg:'rgba(255,255,255,0.10)',
-    edgeLabelStroke:'#0B1220'
-  },
-  light: {
-    canvasBg:'#FBFAF7', dot:'rgba(148,163,184,0.55)',
-    text:'#1F2430', muted:'#5B6472',
-    cardTop:0.12, cardBottom:0.03, cardBorder:0.35,
-    regionTop:0.05, regionBottom:0.012, regionBorder:0.28,
-    centerTop:0.16, centerBottom:0.03, centerBorder:0.6,
-    glowAlpha:0.14, chipAlpha:0.12, chipBg:'#F5EDEF',
-    edgeLabelStroke:'#FBFAF7'
-  }
-};
+  <main id="workspace" class="workspace" data-panel-mode="split">
+    <section id="asIsPane" class="pane" data-pane-shell="asIs">
+      <div class="pane-title">
+        <div><strong>As-Is</strong><span>Current code · semantics read-only · blocks/traces movable</span></div>
+        <div class="pane-controls">
+          <button class="panel-toggle" data-panel-toggle="asIs" aria-pressed="false">Expand</button>
+          <button class="fit-control" data-fit="asIs" title="Fit the complete graph">Fit</button>
+          <div class="zoom"><button data-zoom="asIs" data-delta="-0.1">−</button><output id="asIsZoom">100%</output><button data-zoom="asIs" data-delta="0.1">+</button></div>
+        </div>
+      </div>
+      <div class="canvas-scroll">
+        <div id="asIsSurface" class="surface readonly" data-pane="asIs">
+          <svg class="edge-layer" aria-hidden="true"></svg>
+          <div class="node-layer"></div>
+        </div>
+      </div>
+    </section>
 
-// 信号流（G2）块类型色：深/浅各一套
-var SFLOW = {
-  dark: {
-    process:{fill:'#0f1a26',stroke:'#5b8fd4'},
-    control:{fill:'#180f28',stroke:'#a06bd8'},
-    sensor:{fill:'#0c2024',stroke:'#3fbfbf'},
-    actuator:{fill:'#241014',stroke:'#e06a6a'},
-    'data-store':{fill:'#0f200f',stroke:'#6fbf6f'},
-    external:{fill:'#141419',stroke:'#8a8a99'}
-  },
-  light: {
-    process:{fill:'#eef4fb',stroke:'#4a7fc1'},
-    control:{fill:'#f4ecfb',stroke:'#8a5bb5'},
-    sensor:{fill:'#e6f7f7',stroke:'#2b9a9a'},
-    actuator:{fill:'#fdeaea',stroke:'#c14a4a'},
-    'data-store':{fill:'#eef7ee',stroke:'#5c9a5c'},
-    external:{fill:'#f2f2f2',stroke:'#999'}
-  }
-};
-var EDGE_COLORS = {
-  dark:  { signal:'#a06bd8', control:'#f0a04b', data:'#6fbf6f' },
-  light: { signal:'#8a5bb5', control:'#d98e3a', data:'#5c9a5c' }
-};
+    <section id="toBePane" class="pane target-pane" data-pane-shell="toBe">
+      <div class="pane-title">
+        <div><strong>To-Be</strong><span>Target design · editable · blocks/traces movable</span></div>
+        <div class="pane-controls">
+          <button class="panel-toggle" data-panel-toggle="toBe" aria-pressed="false">Expand</button>
+          <button class="fit-control" data-fit="toBe" title="Fit the complete graph">Fit</button>
+          <div class="zoom"><button data-zoom="toBe" data-delta="-0.1">−</button><output id="toBeZoom">100%</output><button data-zoom="toBe" data-delta="0.1">+</button></div>
+        </div>
+      </div>
+      <div class="canvas-scroll">
+        <div id="toBeSurface" class="surface" data-pane="toBe">
+          <svg class="edge-layer" aria-hidden="true"></svg>
+          <div class="node-layer"></div>
+        </div>
+      </div>
+    </section>
+  </main>
 
-// 图 2：信号流块图（块=信号处理环节，边=流动的信号；safety 举例）
-var G2 = {
-  nodes: [
-    {id:'check',label:'check 源',sub:'触发源 · 只报事实',type:'sensor',x:30,y:200,w:180,h:90},
-    {id:'judge',label:'判决 errLevelOf',sub:'等级查 SSOT',type:'control',x:280,y:190,w:210,h:110},
-    {id:'record',label:'记录 DataLogChannel',sub:'留痕',type:'process',x:560,y:110,w:210,h:90},
-    {id:'act',label:'动作 exec* 写位',sub:'只写位不碰硬件',type:'control',x:560,y:260,w:210,h:90},
-    {id:'exec',label:'执行 主循环',sub:'读位 · 判动作',type:'process',x:830,y:190,w:190,h:110},
-    {id:'mcu',label:'MCU 执行机构',sub:'EtherCAT',type:'actuator',x:1080,y:190,w:130,h:90},
-    {id:'data',label:'Data 落盘',sub:'黑匣子/日志',type:'data-store',x:830,y:380,w:190,h:80}
-  ],
-  edges: [
-    {id:'f1',from:'check',to:'judge',label:'code（事实）',type:'signal'},
-    {id:'f2',from:'judge',to:'record',label:'等级 → 记录',type:'signal'},
-    {id:'f3',from:'judge',to:'act',label:'等级(五档) → 动作',type:'signal'},
-    {id:'f4',from:'act',to:'exec',label:'安全位 (hold/estop)',type:'signal'},
-    {id:'f5',from:'exec',to:'mcu',label:'MOTOR_DISABLE 命令',type:'signal'},
-    {id:'f6',from:'record',to:'data',label:'ERROR_EVENT',type:'data'}
-  ]
-};
+  <aside id="inspector" class="inspector" aria-hidden="true">
+    <div class="inspector-heading">
+      <div><span class="eyebrow">Selected</span><h2 id="inspectorTitle">Block</h2></div>
+      <button id="closeInspector" class="icon-button" aria-label="Close inspector">×</button>
+    </div>
+    <form id="nodeForm" class="form-grid" hidden>
+      <label>Label<input name="label" required></label>
+      <label>Type<input name="type" required list="nodeTypes"></label>
+      <label class="full">Description<textarea name="description" rows="3"></textarea></label>
+      <label class="full">Parent block<select name="parentId"></select></label>
+      <fieldset class="full"><legend>Code binding</legend>
+        <label>Filename<input name="filename"></label>
+        <label>Namespace<input name="namespace"></label>
+        <label>Process<input name="process"></label>
+        <label>Function<input name="function"></label>
+        <label>Status<select name="bindingStatus"><option>unbound</option><option>proposed</option><option>confirmed</option></select></label>
+        <label>Source<select name="bindingSource"><option>none</option><option>agent</option><option>user</option></select></label>
+      </fieldset>
+      <fieldset class="full"><legend>Display</legend>
+        <label>Width<input name="width" type="number" min="140" max="900"></label>
+        <label>Height<input name="height" type="number" min="72" max="700"></label>
+      </fieldset>
+    </form>
+    <form id="edgeForm" class="form-grid" hidden>
+      <label>Label<input name="label"></label>
+      <label>Type<input name="type" required list="edgeTypes"></label>
+      <label class="full">Description<textarea name="description" rows="3"></textarea></label>
+      <label>Source<select name="source"></select></label>
+      <label>Target<select name="target"></select></label>
+    </form>
+  </aside>
 
-// ============ 图 3：全景（archify 风，规格 #2） ============
-var G3 = {
-  nodes: [
-    {id:'p-top', kind:'card', color:'purple', x:500, y:30, w:860, h:96,
-     title:'🦾 医疗手术机器人 FSM 控制系统',
-     bullets:['`Hard-RT`  `Safety`  `SSOT`  `EtherCAT`']},
-    {id:'p-center', kind:'center', color:'purple', x:760, y:600, w:380, h:220,
-     title:'SpvrApp', sub:'监督 · 配置 · 分发',
-     bullets:['`状态转换`  `配置分发`','监督主进程 · 中枢']},
-    {id:'r-input', kind:'region', color:'cyan', x:60, y:200, w:540, h:360, title:'输入与命令', en:'Command & Input'},
-    {id:'r-super', kind:'region', color:'green', x:60, y:600, w:540, h:260, title:'进程监督', en:'Process Supervision'},
-    {id:'r-motion', kind:'region', color:'blue', x:1320, y:200, w:560, h:300, title:'运动控制', en:'Motion Control'},
-    {id:'r-comm', kind:'region', color:'rose', x:1320, y:540, w:560, h:300, title:'通信传输', en:'Communication'},
-    {id:'r-mcu', kind:'region', color:'red', x:1320, y:880, w:560, h:200, title:'执行机构', en:'Actuator'},
-    {id:'r-data', kind:'region', color:'orange', x:180, y:980, w:1040, h:260, title:'数据总线', en:'Data Bus'},
-    {id:'c-iri', kind:'card', color:'cyan', x:90, y:270, w:230, h:130, title:'IRI 操作台', bullets:['命令 / 配置源']},
-    {id:'c-cmdr', kind:'card', color:'cyan', x:340, y:270, w:230, h:130, title:'Cmdr ×4', bullets:['禁用 · 留座']},
-    {id:'c-appmgr', kind:'card', color:'green', x:90, y:660, w:480, h:140, title:'AppMgr', bullets:['进程生命周期','fork / SIGTERM 托管']},
-    {id:'c-flwr', kind:'card', color:'blue', x:1350, y:270, w:500, h:160, title:'Flwr ×5', bullets:['运动控制 · 1kHz 闭环']},
-    {id:'c-comm', kind:'card', color:'rose', x:1350, y:610, w:500, h:160, title:'Comm', bullets:['通信传输 · EtherCAT']},
-    {id:'c-mcu', kind:'card', color:'red', x:1350, y:940, w:500, h:110, title:'MCU', bullets:['执行机构']},
-    {id:'c-shm', kind:'card', color:'orange', x:210, y:1040, w:470, h:140, title:'SHM 共享内存', bullets:['数据总线','inbox / active / 遥测']},
-    {id:'c-data', kind:'card', color:'orange', x:720, y:1040, w:470, h:140, title:'Data 落盘', bullets:['日志 · 黑匣子']}
-  ],
-  edges: [
-    {id:'pe0', from:'p-top', to:'p-center', label:'系统核心', color:'purple', dash:false},
-    {id:'pe1', from:'c-iri', to:'p-center', label:'命令/配置', color:'cyan', dash:false},
-    {id:'pe2', from:'c-appmgr', to:'p-center', label:'进程托管', color:'green', dash:false},
-    {id:'pe3', from:'p-center', to:'c-flwr', label:'状态转换/目标', color:'purple', dash:false},
-    {id:'pe4', from:'c-flwr', to:'c-comm', label:'关节目标', color:'blue', dash:false},
-    {id:'pe5', from:'c-comm', to:'c-mcu', label:'电机命令', color:'rose', dash:false},
-    {id:'pe6', from:'c-mcu', to:'c-comm', label:'传感器反馈', color:'rose', dash:true},
-    {id:'pe7', from:'c-comm', to:'c-flwr', label:'反馈闭环', color:'blue', dash:true},
-    {id:'pe8', from:'p-center', to:'c-shm', label:'配置 inbox/active', color:'orange', dash:false},
-    {id:'pe9', from:'c-flwr', to:'c-shm', label:'遥测 publish', color:'orange', dash:false},
-    {id:'pe10', from:'c-comm', to:'c-shm', label:'状态 publish', color:'orange', dash:false},
-    {id:'pe11', from:'c-shm', to:'c-data', label:'ERROR_EVENT/日志', color:'orange', dash:false}
-  ]
-};
+  <dialog id="handoffDialog">
+    <div class="dialog-mark">✓</div>
+    <h2>Design saved for the Agent</h2>
+    <p>The portable fallback is one short command in the original chat.</p>
+    <div class="command-row"><code id="continueCommand"></code><button id="copyCommand">Copy</button></div>
+    <div id="handoffSummary" class="handoff-summary"></div>
+    <button id="closeDialog" class="primary dialog-close">Done</button>
+  </dialog>
 
-var sel = null, seq = 100, drag = null, connect = null, pan = null, currentJson = '', tab = 'pano';
-var view = {x:0, y:0, scale:1};
-var entrance = false;
-var NS = 'http://www.w3.org/2000/svg';
-var canvas = document.getElementById('canvas');
-var world = document.getElementById('world');
-var layer = document.getElementById('layer');
-
-function cur(){ return tab==='flow' ? G2 : G3; }
-function nodeById(id){ var g=cur(); for(var i=0;i<g.nodes.length;i++) if(g.nodes[i].id===id) return g.nodes[i]; return null; }
-function ckey(k){ return PANO_COLORS[k] ? k : 'gray'; }
-function mainColor(k){ var c=PANO_COLORS[k]||PANO_COLORS.gray; return theme==='dark' ? c.dark : c.light; }
-function rgba(k, a){ var c=PANO_COLORS[k]||PANO_COLORS.gray; return 'rgba('+c.rgb+','+a+')'; }
-// 子块坐标 = 相对父块左上角的偏移；pos() 给出画布实际位置（父块拖动时子块自动跟随）
-function pos(n){
-  if(n && n.parent){
-    var p = nodeById(n.parent);
-    if(p) return {x:p.x+n.x, y:p.y+n.y, w:n.w, h:n.h};
-  }
-  return {x:n.x, y:n.y, w:n.w, h:n.h};
-}
-function cx(n){ var p=pos(n); return p.x + p.w/2; }
-function cy(n){ var p=pos(n); return p.y + p.h/2; }
-function hasChildren(id){ var g=cur(); for(var i=0;i<g.nodes.length;i++) if(g.nodes[i].parent===id) return true; return false; }
-// 从块中心沿 (dx,dy) 方向到矩形边框的交点（连线锚定边框，不穿心）
-function borderPoint(n, dx, dy){
-  var p = pos(n);
-  var cxp = p.x + p.w/2, cyp = p.y + p.h/2;
-  if(dx === 0 && dy === 0) return {x: cxp, y: cyp};
-  var sx = dx !== 0 ? (p.w/2) / Math.abs(dx) : Infinity;
-  var sy = dy !== 0 ? (p.h/2) / Math.abs(dy) : Infinity;
-  var t = Math.min(sx, sy);
-  return { x: cxp + dx*t, y: cyp + dy*t };
-}
-// 一条边的两端点：A 的边框指向 B 的点 + B 的边框指向 A 的点
-function edgeEndpoints(a, b){
-  var pa = pos(a), pb = pos(b);
-  var ca = {x: pa.x + pa.w/2, y: pa.y + pa.h/2};
-  var cb = {x: pb.x + pb.w/2, y: pb.y + pb.h/2};
-  var dx = cb.x - ca.x, dy = cb.y - ca.y;
-  var p1 = borderPoint(a, dx, dy);
-  var p2 = borderPoint(b, -dx, -dy);
-  return { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
-}
-// 平滑贝塞尔：两端水平切线（archify 曲线连线）
-function edgePath(a, b){
-  var ep = edgeEndpoints(a, b);
-  var mx = ep.x1 + (ep.x2 - ep.x1)/2;
-  return { d:'M'+ep.x1+' '+ep.y1+' C'+mx+' '+ep.y1+', '+mx+' '+ep.y2+', '+ep.x2+' '+ep.y2, mx:mx, my:(ep.y1+ep.y2)/2 };
-}
-// 文本宽度估算：CJK 全角≈字号，ASCII≈0.55×字号（够用即可，不必精确排版）
-function textWidth(s, size){
-  if(!s) return 0;
-  var w = 0;
-  for(var i=0;i<s.length;i++){ w += (s.charCodeAt(i) > 0x2E80 ? size : size*0.55); }
-  return w;
-}
-// 块自适应：文字（标签/说明）超过块宽/高时自动撑大；只增不减
-function fitNode(n){
-  var pad = 10;
-  var kids = hasChildren(n.id);
-  var lf = kids ? 13 : 15, sf = kids ? 10.5 : 11;
-  var needW = Math.max(textWidth(n.label, lf), textWidth(n.sub||'', sf)) + 2*pad;
-  var needH = kids ? 44 : 36;
-  if(needW > n.w) n.w = Math.ceil(needW);
-  if(needH > n.h) n.h = Math.ceil(needH);
-}
-function toWorld(sx, sy){ return {x:(sx-view.x)/view.scale, y:(sy-view.y)/view.scale}; }
-function applyView(){ world.setAttribute('transform', 'translate('+view.x+','+view.y+') scale('+view.scale+')'); document.getElementById('zoomlabel').textContent = Math.round(view.scale*100)+'%'; }
-function zoomIn(){ zoomAt(canvas.clientWidth/2, canvas.clientHeight/2, 1.2); }
-function zoomOut(){ zoomAt(canvas.clientWidth/2, canvas.clientHeight/2, 1/1.2); }
-function zoomAt(sx, sy, factor){
-  var w = toWorld(sx, sy);
-  view.scale *= factor;
-  view.x = sx - w.x*view.scale;
-  view.y = sy - w.y*view.scale;
-  applyView();
-}
-function fitView(){
-  var g = cur();
-  if(!g.nodes.length) return;
-  var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-  for(var i=0;i<g.nodes.length;i++){ var n=g.nodes[i], p=pos(n); minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x+p.w); maxY=Math.max(maxY,p.y+p.h); }
-  var w=maxX-minX, h=maxY-minY, cw=canvas.clientWidth, ch=canvas.clientHeight, pad=40;
-  var scale = Math.min((cw-2*pad)/w, (ch-2*pad)/h);
-  view.scale = Math.min(Math.max(scale,0.1), 1.5);
-  view.x = (cw - w*view.scale)/2 - minX*view.scale;
-  view.y = (ch - h*view.scale)/2 - minY*view.scale;
-  applyView();
-}
-function el(name, attrs, text){
-  var e = document.createElementNS(NS, name);
-  for(var k in attrs) e.setAttribute(k, attrs[k]);
-  if(text!==undefined) e.textContent = text;
-  return e;
-}
-function gradient(id, stops){
-  var g = el('linearGradient', {id:id, x1:'0', y1:'0', x2:'0', y2:'1'});
-  for(var i=0;i<stops.length;i++) g.appendChild(el('stop', {offset:stops[i][0], 'stop-color':stops[i][1]}));
-  return g;
-}
-// 每色渐变 + 箭头标记（按需）——theme 切换时重建
-var markerCache = {};
-function buildDefs(){
-  var defs = document.getElementById('defs');
-  defs.innerHTML = '';
-  markerCache = {};
-  var T = THEME[theme];
-  for(var k in PANO_COLORS){
-    defs.appendChild(gradient('grad-card-'+k,  [['0%', rgba(k, T.cardTop)],  ['100%', rgba(k, T.cardBottom)]]));
-    defs.appendChild(gradient('grad-region-'+k,[['0%', rgba(k, T.regionTop)],['100%', rgba(k, T.regionBottom)]]));
-    defs.appendChild(gradient('grad-center-'+k,[['0%', rgba(k, T.centerTop)],['100%', rgba(k, T.centerBottom)]]));
-  }
-}
-function arrowMarker(color){
-  if(markerCache[color]) return markerCache[color];
-  var id = 'am' + Object.keys(markerCache).length;
-  markerCache[color] = id;
-  var m = el('marker', {id:id, viewBox:'0 0 10 10', refX:8.5, refY:5, markerWidth:6.5, markerHeight:6.5, orient:'auto'});
-  m.appendChild(el('path', {d:'M0,0 L10,5 L0,10 z', fill:color}));
-  document.getElementById('defs').appendChild(m);
-  return id;
-}
-function setBg(t){
-  var T = THEME[theme];
-  canvas.style.backgroundColor = T.canvasBg;
-  canvas.style.backgroundImage = 'radial-gradient(circle, '+T.dot+' 1.5px, transparent 1.5px)';
-  canvas.style.backgroundSize = '28px 28px';
-}
-function setTab(t){
-  tab = t;
-  document.getElementById('tab-flow').className = 'tab' + (t==='flow'?' active':'');
-  document.getElementById('tab-pano').className = 'tab' + (t==='pano'?' active':'');
-  sel = null;
-  setBg(t);
-  entrance = true;
-  render();
-  fitView();
-}
-function setTheme(t){
-  theme = t;
-  document.body.dataset.theme = t;
-  document.getElementById('btnTheme').textContent = theme==='dark' ? '🌙 深色' : '☀️ 浅色';
-  buildDefs();
-  setBg(tab);
-  entrance = true;
-  render();
-  fitView();
-}
-function toggleTheme(){ setTheme(theme==='dark' ? 'light' : 'dark'); }
-
-// ---- 全景（archify 白板）渲染 ----
-function drawRichLine(x, y, text, size, color, codeColor){
-  var parts = String(text).split('`');
-  var cx = x;
-  var mono = 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-  var T = THEME[theme];
-  var t = el('text', {x:x, y:y, 'text-anchor':'start', 'font-size':size, fill:color});
-  for(var i=0;i<parts.length;i++){
-    var seg = parts[i];
-    if(!seg) continue;
-    if(i%2===1){
-      var cw = textWidth(seg, size*0.92);
-      var cr = el('rect', {x:cx-2, y:y-size*0.78, width:cw+4, height:size*1.12, rx:3, fill:T.chipBg, stroke:'none'});
-      layer.appendChild(cr);
-      var ts = el('tspan', {'font-family':mono, 'font-size':size*0.92, fill:(codeColor||color)}, seg);
-      t.appendChild(ts);
-      cx += cw;
-    } else {
-      var ts2 = el('tspan', {'font-size':size, fill:color}, seg);
-      t.appendChild(ts2);
-      cx += textWidth(seg, size);
-    }
-  }
-  layer.appendChild(t);
-  return cx - x;
-}
-function panoHandle(n, c){
-  var p = pos(n);
-  var hd = el('circle',{cx:p.x+n.w, cy:p.y+n.h/2, r:6, fill:c, stroke:'#fff','stroke-width':1.5});
-  hd.dataset.handle = n.id; hd.style.cursor='crosshair';
-  layer.appendChild(hd);
-}
-function drawRegion(n){
-  var k = ckey(n.color), c = mainColor(k), T = THEME[theme];
-  var bg = el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:18,fill:'url(#grad-region-'+k+')',stroke:rgba(k,T.regionBorder),'stroke-width':1.5});
-  bg.dataset.node = n.id; bg.style.cursor='move';
-  bg.style.filter = 'drop-shadow(0 8px 24px '+rgba(k,T.glowAlpha*0.7)+')';
-  layer.appendChild(bg);
-  var label = n.title + (n.en ? '  '+n.en : '');
-  var tw = textWidth(label, 13);
-  var pillW = tw + 24, pillH = 26;
-  var pill = el('rect',{x:n.x+14, y:n.y-pillH/2, width:pillW, height:pillH, rx:pillH/2, fill:c});
-  pill.dataset.node = n.id; pill.style.cursor='move';
-  pill.style.filter = 'drop-shadow(0 4px 10px '+rgba(k,0.35)+')';
-  layer.appendChild(pill);
-  var pt = el('text',{x:n.x+26, y:n.y+4, 'text-anchor':'start','font-size':13,'font-weight':'bold',fill:(theme==='dark'?'#08111F':'#fff')}, label);
-  pt.dataset.node = n.id; pt.style.cursor='move';
-  layer.appendChild(pt);
-  if(editing) panoHandle(n, c);
-}
-function drawCard(n){
-  var k = ckey(n.color), c = mainColor(k), T = THEME[theme];
-  var p = pos(n);
-  var bg = el('rect',{x:p.x,y:p.y,width:n.w,height:n.h,rx:12,fill:'url(#grad-card-'+k+')',stroke:rgba(k,T.cardBorder),'stroke-width':1});
-  bg.dataset.node = n.id; bg.style.cursor='move';
-  bg.style.filter = 'drop-shadow(0 6px 18px '+rgba(k,T.glowAlpha*0.6)+')';
-  layer.appendChild(bg);
-  var t1 = el('text',{x:p.x+14,y:p.y+26,'text-anchor':'start','font-size':14,'font-weight':'bold',fill:c}, (n.title||''));
-  t1.dataset.node = n.id; t1.style.cursor='move';
-  layer.appendChild(t1);
-  var by = p.y + 52;
-  for(var i=0;i<(n.bullets||[]).length;i++){
-    if(n.bullets[i]) drawRichLine(p.x+14, by, n.bullets[i], 11, T.muted, c);
-    by += 18;
-  }
-  if(editing) panoHandle(n, c);
-}
-function drawCenter(n){
-  var k = ckey(n.color), c = mainColor(k), T = THEME[theme];
-  var bg = el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:16,fill:'url(#grad-center-'+k+')',stroke:rgba(k,T.centerBorder),'stroke-width':2});
-  bg.dataset.node = n.id; bg.style.cursor='move';
-  bg.style.filter = 'drop-shadow(0 0 32px '+rgba(k,T.glowAlpha)+')';
-  layer.appendChild(bg);
-  var t1 = el('text',{x:n.x+n.w/2,y:n.y+38,'text-anchor':'middle','font-size':21,'font-weight':'bold',fill:c}, (n.title||''));
-  t1.dataset.node = n.id; t1.style.cursor='move';
-  layer.appendChild(t1);
-  if(n.sub){
-    var t2 = el('text',{x:n.x+n.w/2,y:n.y+64,'text-anchor':'middle','font-size':13,fill:T.muted}, n.sub);
-    t2.dataset.node = n.id; t2.style.cursor='move';
-    layer.appendChild(t2);
-  }
-  var by = n.y + 96;
-  for(var i=0;i<(n.bullets||[]).length;i++){
-    if(n.bullets[i]) drawRichLine(n.x+24, by, n.bullets[i], 12, T.muted, c);
-    by += 20;
-  }
-  if(editing) panoHandle(n, c);
-}
-function drawDoc(n){
-  var T = THEME[theme];
-  var ft = el('text',{x:n.x+2, y:n.y-8, 'text-anchor':'start','font-size':10, fill:T.muted}, (n.filename||''));
-  layer.appendChild(ft);
-  var bg = el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:8,fill:(theme==='dark'?'#141d2e':'#F1F0ED'),stroke:(theme==='dark'?'#26324a':'#E3E0D9'),'stroke-width':1});
-  bg.dataset.node = n.id; bg.style.cursor='move';
-  layer.appendChild(bg);
-  var t1 = el('text',{x:n.x+14,y:n.y+24,'text-anchor':'start','font-size':13,'font-weight':'bold',fill:T.text}, (n.title||''));
-  t1.dataset.node = n.id; t1.style.cursor='move';
-  layer.appendChild(t1);
-  var by = n.y + 48;
-  if(n.sub){
-    var t2 = el('text',{x:n.x+14,y:by,'text-anchor':'start','font-size':12,'font-weight':'bold',fill:'#F87171'}, n.sub);
-    t2.dataset.node = n.id; t2.style.cursor='move';
-    layer.appendChild(t2);
-    by += 20;
-  }
-  for(var i=0;i<(n.body||[]).length;i++){
-    if(n.body[i]){
-      var bt = el('text',{x:n.x+14,y:by,'text-anchor':'start','font-size':10.5,fill:T.muted}, n.body[i]);
-      layer.appendChild(bt);
-    }
-    by += 16;
-  }
-  if(editing) panoHandle(n, panoHandleColor(n.color));
-}
-function panoHandleColor(k){ return mainColor(ckey(k)); }
-// 连线标签 chip（彩色圆角 pill）
-function edgeLabelChip(k, col, text, px, py){
-  var T = THEME[theme];
-  var tw = textWidth(text, 12);
-  var lw = tw + 16, lh = 20;
-  var lx = px - lw/2, ly = py - 26;
-  var chip = el('rect',{x:lx, y:ly, width:lw, height:lh, rx:lh/2, fill:rgba(k, T.chipAlpha), stroke:rgba(k, 0.5), 'stroke-width':1});
-  layer.appendChild(chip);
-  layer.appendChild(el('text',{x:px, y:ly+lh/2+4, 'text-anchor':'middle','font-size':12,'font-weight':'600',fill:col}, text));
-}
-function drawPanoEdge(e){
-  var a = nodeById(e.from), b = nodeById(e.to);
-  if(!a||!b) return;
-  var k = ckey(e.color||'gray'), col = mainColor(k);
-  var p = edgePath(a, b);
-  var base = el('path',{d:p.d, fill:'none', stroke:col, 'stroke-width':2, 'stroke-opacity':(e.dash?0.5:0.35), 'marker-end':'url(#'+arrowMarker(col)+')'});
-  if(e.dash) base.setAttribute('stroke-dasharray','5,6');
-  base.dataset.edge = e.id; base.style.cursor='pointer';
-  layer.appendChild(base);
-  if(!e.dash){
-    // 流动动画覆盖线：虚线沿路径行进，表方向
-    var flow = el('path',{d:p.d, fill:'none', stroke:col, 'stroke-width':3, 'stroke-linecap':'round', 'stroke-dasharray':'2 12'});
-    flow.style.animation = 'flowDash 0.9s linear infinite';
-    flow.setAttribute('pointer-events','none');
-    layer.appendChild(flow);
-  }
-  if(e.label) edgeLabelChip(k, col, e.label, p.mx, p.my);
-}
-function renderPano(){
-  var g = G3;
-  layer.innerHTML = '';
-  var regions=[], cards=[], centers=[], docs=[];
-  for(var i=0;i<g.nodes.length;i++){
-    var n = g.nodes[i];
-    if(n.kind==='region') regions.push(n);
-    else if(n.kind==='center') centers.push(n);
-    else if(n.kind==='doc') docs.push(n);
-    else cards.push(n);
-  }
-  var doEnter = entrance; entrance = false;
-  for(var j=0;j<regions.length;j++) drawRegion(regions[j]);
-  for(var k=0;k<cards.length;k++) drawCard(cards[k]);
-  for(var m=0;m<centers.length;m++) drawCenter(centers[m]);
-  for(var d=0;d<docs.length;d++) drawDoc(docs[d]);
-  for(var e=0;e<g.edges.length;e++) drawPanoEdge(g.edges[e]);
-  if(doEnter) animateNodes();
-  updateToolbar();
-  refreshJson();
-  refreshInspector();
-}
-// 节点入场淡入（只在加载/切 tab/切主题时，拖拽重绘不触发）
-function animateNodes(){
-  var g = cur();
-  var all = layer.querySelectorAll('[data-node]');
-  var seen = {};
-  var idx = 0;
-  for(var i=0;i<all.length;i++){
-    var id = all[i].getAttribute('data-node');
-    if(!id || seen[id]) continue;
-    seen[id] = true;
-    // 只动画块的背景 rect（避免文字各自错位）
-    if(all[i].tagName === 'rect' || all[i].tagName === 'circle'){
-      all[i].style.animation = 'nodeIn 0.4s ease both';
-      all[i].style.animationDelay = (idx*40) + 'ms';
-      idx++;
-    }
-  }
-}
-
-function render(){
-  if(tab === 'pano'){ renderPano(); return; }
-  var g = cur();
-  for(var fi=0;fi<g.nodes.length;fi++) fitNode(g.nodes[fi]);
-  for(var fj=0;fj<g.nodes.length;fj++){
-    var fk=g.nodes[fj]; if(!fk.parent) continue;
-    var fp=nodeById(fk.parent); if(!fp) continue;
-    var fx=fk.x+fk.w, fy=fk.y+fk.h;
-    if(fx>fp.w) fp.w=Math.ceil(fx+6);
-    if(fy>fp.h) fp.h=Math.ceil(fy+6);
-  }
-  layer.innerHTML = '';
-  var doEnter = entrance; entrance = false;
-  var T = THEME[theme];
-  var order = g.nodes.slice();
-  order.sort(function(a,b){ return (a.parent?1:0)-(b.parent?1:0); });
-  for(var j=0;j<order.length;j++){
-    var n = order[j], pp = pos(n);
-    var st = (SFLOW[theme][n.type]) || SFLOW[theme].process;
-    var fill = st.fill, stroke = (n.id===sel?'#FBBF24':st.stroke);
-    var grp = el('g',{});
-    var r = el('rect',{x:pp.x,y:pp.y,width:pp.w,height:pp.h,rx:10,fill:fill,stroke:stroke,'stroke-width':(n.id===sel?3:1.6)});
-    r.dataset.node = n.id; r.style.cursor='move';
-    r.style.filter = 'drop-shadow(0 4px 12px '+rgba('gray', T.glowAlpha*0.5)+')';
-    var titleCol = theme==='dark' ? '#dbe4f0' : '#1c3d5a';
-    var subCol = theme==='dark' ? '#8894a6' : '#777';
-    if(hasChildren(n.id)){
-      var t1 = el('text',{x:pp.x+12,y:pp.y+22,'text-anchor':'start','font-size':13,'font-weight':'bold',fill:titleCol}, n.label);
-      t1.dataset.node = n.id; t1.style.cursor='move';
-      var t2 = el('text',{x:pp.x+12,y:pp.y+38,'text-anchor':'start','font-size':10.5,fill:subCol}, (n.sub||'')+' ['+n.type+']');
-      t2.dataset.node = n.id; t2.style.cursor='move';
-    } else {
-      var t1 = el('text',{x:cx(n),y:cy(n)-4,'text-anchor':'middle','font-size':15,'font-weight':'bold',fill:titleCol}, n.label);
-      t1.dataset.node = n.id; t1.style.cursor='move';
-      var t2 = el('text',{x:cx(n),y:cy(n)+18,'text-anchor':'middle','font-size':11,fill:subCol}, (n.sub||'')+' ['+n.type+']');
-      t2.dataset.node = n.id; t2.style.cursor='move';
-    }
-    grp.appendChild(r); grp.appendChild(t1); grp.appendChild(t2);
-    if(editing){
-      var hd = el('circle',{cx:pp.x+pp.w, cy:cy(n), r:6, fill:stroke, stroke:'#fff','stroke-width':1.5});
-      hd.dataset.handle = n.id; hd.style.cursor='crosshair';
-      grp.appendChild(hd);
-    }
-    layer.appendChild(grp);
-  }
-  for(var i=0;i<g.edges.length;i++){
-    var e = g.edges[i], a = nodeById(e.from), b = nodeById(e.to);
-    if(!a||!b) continue;
-    var col = (EDGE_COLORS[theme][e.type]) || '#94A3B8';
-    var p = edgePath(a, b);
-    var base = el('path',{d:p.d, fill:'none', stroke:col, 'stroke-width':(e.id===sel?3:1.8), 'stroke-opacity':0.4, 'marker-end':'url(#'+arrowMarker(col)+')'});
-    base.dataset.edge = e.id; base.style.cursor='pointer';
-    layer.appendChild(base);
-    var flow = el('path',{d:p.d, fill:'none', stroke:col, 'stroke-width':2.5, 'stroke-linecap':'round', 'stroke-dasharray':'2 12'});
-    flow.style.animation = 'flowDash 0.9s linear infinite';
-    flow.setAttribute('pointer-events','none');
-    layer.appendChild(flow);
-    if(e.label){
-      var keyColor = e.type==='signal'?'purple':(e.type==='control'?'orange':'green');
-      edgeLabelChip(keyColor, col, e.label, p.mx, p.my);
-    }
-  }
-  if(doEnter) animateNodes();
-  updateToolbar();
-  refreshJson();
-  refreshInspector();
-}
-
-function updateToolbar(){
-  document.getElementById('btnEdit').textContent = editing ? '🔒 只读' : '✏️ 编辑模式';
-  document.getElementById('editHint').textContent = editing ? '编辑中：拖块 / 连线 / 改名 / 删除' : '只读 · 点「编辑模式」可改图';
-  var showEdit = editing;
-  document.getElementById('btnAdd').style.display = showEdit ? '' : 'none';
-  document.getElementById('btnSave').style.display = showEdit ? '' : 'none';
-  document.getElementById('btnCopy').style.display = showEdit ? '' : 'none';
-}
-
-function refreshJson(){
-  currentJson = JSON.stringify({version:2, signalFlow:G2, panorama:G3}, null, 2);
-}
-function refreshInspector(){
-  if(!editing){ document.getElementById('inspector').style.display='none'; return; }
-  var ins = document.getElementById('inspector');
-  var selType = document.getElementById('typeSel'), selLabel = document.getElementById('labelInp');
-  var g = cur();
-  var n = nodeById(sel), e = g.edges.filter(function(x){return x.id===sel;})[0];
-  if(n){
-    ins.style.display='inline';
-    selType.disabled = false;
-    selType.innerHTML='';
-    if(tab==='pano'){
-      var KINDS=['card','region','center','doc'];
-      for(var i=0;i<KINDS.length;i++){ var o=document.createElement('option'); o.value=KINDS[i]; o.text=KINDS[i]; if(n.kind===KINDS[i])o.selected=true; selType.appendChild(o); }
-      selType.onchange = function(){ n.kind = selType.value; render(); };
-      selLabel.value = n.title || '';
-      selLabel.oninput = function(){ n.title = selLabel.value; render(); };
-    } else {
-      for(var j=0;j<NODE_TYPES.length;j++){ var o2=document.createElement('option'); o2.value=NODE_TYPES[j]; o2.text=NODE_TYPES[j]; if(n.type===NODE_TYPES[j])o2.selected=true; selType.appendChild(o2); }
-      selType.onchange = function(){ n.type = selType.value; render(); };
-      selLabel.value = n.label;
-      selLabel.oninput = function(){ n.label = selLabel.value; render(); };
-    }
-  } else if(e){
-    ins.style.display='inline';
-    selType.disabled = false;
-    selType.innerHTML='';
-    if(tab==='pano'){
-      var COLORS=Object.keys(PANO_COLORS);
-      for(var k=0;k<COLORS.length;k++){ var oc=document.createElement('option'); oc.value=COLORS[k]; oc.text=COLORS[k]; if(e.color===COLORS[k])oc.selected=true; selType.appendChild(oc); }
-      selType.onchange = function(){ e.color = selType.value; render(); };
-      selLabel.value = e.label || '';
-      selLabel.oninput = function(){ e.label = selLabel.value; render(); };
-    } else {
-      for(var m=0;m<EDGE_TYPES.length;m++){ var q=document.createElement('option'); q.value=EDGE_TYPES[m]; q.text=EDGE_TYPES[m]; if(e.type===EDGE_TYPES[m])q.selected=true; selType.appendChild(q); }
-      selType.onchange = function(){ e.type = selType.value; render(); };
-      selLabel.value = e.label;
-      selLabel.oninput = function(){ e.label = selLabel.value; render(); };
-    }
-  } else {
-    ins.style.display='none';
-    selType.disabled = false;
-  }
-}
-
-function addNode(){
-  var id='n'+(seq++);
-  if(tab==='pano'){
-    cur().nodes.push({id:id, kind:'card', color:'cyan', x:200+Math.random()*400, y:200+Math.random()*400, w:220, h:120, title:'New Card', bullets:[]});
-  } else {
-    cur().nodes.push({id:id,label:'New Block',sub:'',type:'process',x:40+Math.random()*200,y:40+Math.random()*200,w:160,h:70});
-  }
-  sel=id; render();
-}
-function delSel(){
-  if(!sel) return;
-  var g = cur();
-  var isEdge = g.edges.some(function(e){ return e.id===sel; });
-  if(isEdge){ g.edges=g.edges.filter(function(e){return e.id!==sel;}); }
-  else {
-    var dead={};
-    g.nodes.forEach(function(n){ if(n.id===sel||n.parent===sel) dead[n.id]=true; });
-    g.nodes=g.nodes.filter(function(n){ return !dead[n.id]; });
-    g.edges=g.edges.filter(function(e){ return !dead[e.from] && !dead[e.to]; });
-  }
-  sel=null; render();
-}
-function saveGraph(){
-  refreshJson();
-  fetch('/plugins/sysview/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:currentJson})
-    .then(function(r){return r.json();}).then(function(o){ console.log('saved', o.path||o); alert('已保存'); })
-    .catch(function(err){ alert('保存失败：'+err.message+'（独立打开时不可用，请用"复制"）'); });
-}
-function loadGraph(){
-  fetch('/plugins/sysview/graph')
-    .then(function(r){return r.json();})
-    .then(function(o){
-      if(o.signalFlow){ if(o.signalFlow.nodes)G2.nodes=o.signalFlow.nodes; if(o.signalFlow.edges)G2.edges=o.signalFlow.edges; }
-      if(o.panorama){ if(o.panorama.nodes)G3.nodes=o.panorama.nodes; if(o.panorama.edges)G3.edges=o.panorama.edges; }
-      entrance = true;
-      render();
-      fitView();
-    })
-    .catch(function(err){ alert('加载失败，显示默认示例：'+err.message); entrance = true; render(); fitView(); });
-}
-function toggleEdit(){ editing = !editing; sel = null; render(); }
-function setAgentStatus(t){
-  var s = document.getElementById('agentStatus');
-  if(!s) return;
-  s.textContent = t;
-  setTimeout(function(){ if(s.textContent === t) s.textContent = ''; }, 6000);
-}
-function updateAgent(){
-  refreshJson();
-  setAgentStatus('同步中…');
-  fetch('/plugins/sysview/graph',{method:'POST',headers:{'Content-Type':'application/json'},body:currentJson})
-    .then(function(r){return r.json();})
-    .then(function(){
-      return fetch('/plugins/sysview/agent-update',{method:'POST',headers:{'Content-Type':'application/json'},body:currentJson});
-    })
-    .then(function(r){return r.json();})
-    .then(function(o){
-      setAgentStatus('已同步给 agent ✓');
-      if(parent!==window) parent.postMessage('system-view:agent-update','*');
-    })
-    .catch(function(err){
-      setAgentStatus('图已保存；agent 通知需重启 DSH 服务 (dsh web) 后生效');
-    });
-}
-function copyJson(){
-  refreshJson();
-  var t=document.createElement('textarea'); t.value=currentJson; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); alert('已复制 JSON');
-}
-function renameSel(){
-  var n = nodeById(sel);
-  if(!n) return;
-  var key = (tab==='pano') ? 'title' : 'label';
-  var lbl = prompt('名称：', n[key]||'');
-  if(lbl!==null){ n[key]=lbl; render(); }
-}
-
-// ============ 导出（SVG / 2x PNG） ============
-function diagramBBox(){
-  var g = cur();
-  if(!g.nodes.length) return {x:0,y:0,w:800,h:600};
-  var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-  for(var i=0;i<g.nodes.length;i++){ var n=g.nodes[i], p=pos(n); minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x+p.w); maxY=Math.max(maxY,p.y+p.h); }
-  var pad = 48;
-  return {x:minX-pad, y:minY-pad, w:(maxX-minX)+2*pad, h:(maxY-minY)+2*pad};
-}
-function svgString(){
-  var bb = diagramBBox();
-  var clone = canvas.cloneNode(true);
-  clone.removeAttribute('style');
-  clone.setAttribute('xmlns', NS);
-  clone.setAttribute('font-family', "'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif");
-  clone.setAttribute('width', bb.w);
-  clone.setAttribute('height', bb.h);
-  clone.setAttribute('viewBox', bb.x+' '+bb.y+' '+bb.w+' '+bb.h);
-  var worldEl = clone.querySelector('#world');
-  if(worldEl) worldEl.removeAttribute('transform');
-  var bg = document.createElementNS(NS, 'rect');
-  bg.setAttribute('x', bb.x); bg.setAttribute('y', bb.y); bg.setAttribute('width', bb.w); bg.setAttribute('height', bb.h);
-  bg.setAttribute('fill', THEME[theme].canvasBg);
-  clone.insertBefore(bg, clone.firstChild);
-  // 静态化导出：去掉流动/入场动画，避免导出首帧闪烁
-  var anim = clone.querySelectorAll('[style]');
-  for(var i=0;i<anim.length;i++){
-    var s = anim[i].getAttribute('style')||'';
-    if(s.indexOf('flowDash') !== -1 || s.indexOf('nodeIn') !== -1){
-      anim[i].style.animation = 'none';
-      anim[i].style.opacity = '1';
-      anim[i].style.animationDelay = '0ms';
-    }
-  }
-  return new XMLSerializer().serializeToString(clone);
-}
-function download(filename, blob){
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-}
-function exportSVG(){
-  var svg = svgString();
-  download('system-view.svg', new Blob([svg], {type:'image/svg+xml'}));
-}
-function exportPNG(){
-  var svg = svgString();
-  var bb = diagramBBox();
-  var url = URL.createObjectURL(new Blob([svg], {type:'image/svg+xml'}));
-  var img = new Image();
-  img.onload = function(){
-    var scale = 2;
-    var cvs = document.createElement('canvas');
-    cvs.width = Math.round(bb.w*scale); cvs.height = Math.round(bb.h*scale);
-    var ctx2 = cvs.getContext('2d');
-    ctx2.fillStyle = THEME[theme].canvasBg;
-    ctx2.fillRect(0,0,cvs.width,cvs.height);
-    ctx2.drawImage(img, 0, 0, cvs.width, cvs.height);
-    URL.revokeObjectURL(url);
-    cvs.toBlob(function(b){ if(b) download('system-view.png', b); else alert('PNG 导出失败'); }, 'image/png');
-  };
-  img.onerror = function(){ alert('PNG 导出失败'); URL.revokeObjectURL(url); };
-  img.src = url;
-}
-
-canvas.addEventListener('mousedown', function(ev){
-  var h = ev.target.closest ? ev.target.closest('[data-handle]') : null;
-  if(h && editing){ connect={from:h.getAttribute('data-handle')}; ev.preventDefault(); return; }
-  var nd = ev.target.closest ? ev.target.closest('[data-node]') : null;
-  if(nd){ sel=nd.getAttribute('data-node'); if(editing){ var w=toWorld(ev.clientX,ev.clientY); drag={id:sel,dx:w.x-nodeById(sel).x,dy:w.y-nodeById(sel).y}; } render(); ev.preventDefault(); return; }
-  var ed = ev.target.closest ? ev.target.closest('[data-edge]') : null;
-  if(ed){ sel=ed.getAttribute('data-edge'); render(); return; }
-  sel=null; render();
-  pan={startX:ev.clientX,startY:ev.clientY,origX:view.x,origY:view.y};
-  canvas.style.cursor='grabbing';
-});
-window.addEventListener('mousemove', function(ev){
-  if(drag){ var n=nodeById(drag.id); var w=toWorld(ev.clientX,ev.clientY); n.x=w.x-drag.dx; n.y=w.y-drag.dy; render(); }
-  else if(pan){ view.x=pan.origX+(ev.clientX-pan.startX); view.y=pan.origY+(ev.clientY-pan.startY); applyView(); }
-  if(connect){
-    render();
-    var w2 = toWorld(ev.clientX, ev.clientY);
-    var from = nodeById(connect.from), fp = pos(from);
-    var fcx = fp.x+fp.w/2, fcy = fp.y+fp.h/2;
-    var bp2 = borderPoint(from, w2.x-fcx, w2.y-fcy);
-    var mx = bp2.x + (w2.x-bp2.x)/2;
-    layer.appendChild(el('path',{d:'M'+bp2.x+' '+bp2.y+' C'+mx+' '+bp2.y+', '+mx+' '+w2.y+', '+w2.x+' '+w2.y, fill:'none', stroke:'#E879F9','stroke-width':2.5,'stroke-dasharray':'6,4'}));
-  }
-});
-window.addEventListener('mouseup', function(ev){
-  if(connect){
-    render();
-    var t = document.elementFromPoint(ev.clientX, ev.clientY);
-    var nd = t && t.closest ? t.closest('[data-node]') : null;
-    if(nd){ var to=nd.getAttribute('data-node'); if(to && to!==connect.from){ var lbl=prompt('连线标签：'); if(tab==='pano'){ cur().edges.push({id:'e'+(seq++),from:connect.from,to:to,label:lbl||'',color:'gray',dash:false}); } else { cur().edges.push({id:'e'+(seq++),from:connect.from,to:to,label:lbl||'',type:'signal'}); } } }
-    connect=null; render();
-  }
-  drag=null; pan=null; canvas.style.cursor='grab';
-});
-canvas.addEventListener('wheel', function(ev){
-  ev.preventDefault();
-  zoomAt(ev.clientX, ev.clientY, ev.deltaY<0 ? 1.1 : 1/1.1);
-}, {passive:false});
-canvas.addEventListener('dblclick', function(ev){
-  var nd = ev.target.closest ? ev.target.closest('[data-node]') : null;
-  if(nd && editing){ sel=nd.getAttribute('data-node'); renameSel(); }
-});
-window.addEventListener('keydown', function(ev){
-  if(!editing || !sel) return;
-  if(ev.target && (ev.target.tagName==='INPUT' || ev.target.tagName==='SELECT' || ev.target.tagName==='TEXTAREA')) return;
-  if(ev.key==='Delete' || ev.key==='Backspace'){ ev.preventDefault(); delSel(); }
-});
-
-buildDefs();
-setBg('pano');
-entrance = true;
-loadGraph();   // 启动自动加载服务器上已保存的图；失败时 catch 内回退默认示例
-</script>
+  <div id="toast" class="toast" role="status"></div>
+  <datalist id="nodeTypes"><option>system</option><option>process</option><option>function</option><option>check</option><option>data</option><option>step</option><option>group</option></datalist>
+  <datalist id="edgeTypes"><option>call</option><option>sequence</option><option>data</option><option>signal</option><option>control</option><option>dependency</option></datalist>
+  <script src="/plugins/blueprint/app.js" defer></script>
 </body>
 </html>

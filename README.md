@@ -1,12 +1,12 @@
 <p align="right">简体中文</p>
 
-<h1 align="center">dsh-sysview</h1>
+<h1 align="center">dsh-blueprint</h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-202724" alt="DeepSeek Harness plugin">
 </p>
 
-> System View —— 把系统架构 / 工作流画成**可交互的图**，你改完，agent 按你的设计出改动方案。
+> Blueprint —— 把系统架构 / 工作流画成**可交互的图**，你改完，agent 按你的设计出改动方案。
 
 一个 DeepSeek Harness 插件，提供两块画布：
 
@@ -60,13 +60,13 @@ sys-view <scope>
 ## 安装
 
 ```sh
-dsh plugin --profile web add <path-to-dsh-sysview>
+dsh plugin --profile web add <path-to-dsh-blueprint>
 ```
 
 ## 配置
 
 ```yaml
-- id: sysview
+- id: blueprint
   config:
     graphPath: ai_notes/diagrams/system_graph.json
 ```

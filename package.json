@@ -1,7 +1,7 @@
 {
-  "name": "dsh-sysview",
+  "name": "dsh-blueprint",
   "version": "0.1.0",
-  "description": "Interactive system block diagram + signal flow panel for DeepSeek Harness: edit typed blocks/edges, persist to a workspace JSON the agent reads to reason about architecture.",
+  "description": "Interactive design canvas for DeepSeek Harness: a code-grounded As-Is diagram beside an editable To-Be target, with component-architecture, execution-flow and state-workflow profiles. The agent generates As-Is from current code, the user edits To-Be, and Update Agent returns a staged change plan.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -12,12 +12,16 @@
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib",
     "assets",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
   ],
   "license": "MIT",
   "dsh": {
@@ -33,9 +37,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.2-rc.1",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
@@ -47,9 +51,9 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.2-rc.1",
     "react": "^18.2.0"
   }
 }

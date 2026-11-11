@@ -1,9 +1,7 @@
-# system-view bundle patch: mounts the interactive system-diagram plugin
-# into a dsh profile. Server side serves the editor page and a save/load route
-# that persists the graph to <workspace>/<graphPath> (agent-readable JSON).
+# blueprint bundle patch: mounts the interactive design-canvas plugin
+# into a dsh profile. The server serves the editor and a session API that
+# persists As-Is/To-Be to <workspace>/.blueprint (agent-readable JSON).
 # Install: dsh plugin --profile web add <path to this package>
 - insert:
-    - id: sysview
-      name: 'dsh-sysview'
-      config:
-        graphPath: ai_notes/diagrams/system_graph.json
+    - id: blueprint
+      name: 'dsh-blueprint'

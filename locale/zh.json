@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Blueprint",
+    "description": "基于代码现状的 As-Is 画布与可编辑 To-Be 目标，支持 component-architecture、execution-flow、state-workflow 三种视图。"
+  }
+}
