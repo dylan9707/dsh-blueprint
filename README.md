@@ -15,6 +15,8 @@
 - **As-Is（左）**：agent 从当前代码生成的语义图，只读；block 位置 / 尺寸 / 颜色 / trace / 端点可调整。
 - **To-Be（右）**：可编辑目标设计；支持 block、嵌套 sub-block、连线、描述与 code binding。
 - **三种视图 profile**（每次 session 选一个）：`execution-flow`（纵向执行 / 信号流）、`component-architecture`（宽幅 containment 架构）、`state-workflow`（分层状态与迁移）。
+- **编辑器**：block 支持 `rect` / `rounded` / `ellipse` / `diamond` / `hexagon` 五种形状（inspector 切换），可自定义颜色；8px 网格 + 拖动/缩放吸附；Fit 全图、单侧展开、端点四边拖动、trace 手动路由。
+- **空白画布**：`blueprint_blank` 建一个没有 As-Is 的空 session，当 block diagram / logic flow 自由画。
 
 点 **Update Agent** 写 pending handoff；下一轮 agent 读 handoff + diff + 现码，产出 semantic changes、任务清单与待确认问题。
 
@@ -34,6 +36,7 @@
 | 工具 | 作用 |
 |---|---|
 | `blueprint_new` | 从 As-Is 语义图 + viewProfile 建 session |
+| `blueprint_blank` | 建一个空的 To-Be 画布（自由画 block diagram / logic flow） |
 | `blueprint_status` | 读当前 session（As-Is/To-Be/layout/handoff/diff） |
 | `blueprint_diff` | 语义 diff（不含 layout） |
 | `blueprint_consume` | 读完后把 handoff 置为 consumed |

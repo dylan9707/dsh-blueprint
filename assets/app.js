@@ -29,6 +29,8 @@ const CHILD_INSET = 56;
 const ROOT_INSET = 96;
 const ROOT_GAP = 80;
 const EDGE_LANE_GAP = 14;
+const GRID = 8;
+const snap = (value) => Math.round(value / GRID) * GRID;
 
 async function api(path, options = {}) {
   const headers = { "X-Blueprint-Token": token, ...(options.headers || {}) };
@@ -119,6 +121,10 @@ function normalizeLayout(pane, graph) {
   paneLayout.nodeColors ||= {};
   for (const id of Object.keys(paneLayout.nodeColors)) {
     if (!graph.nodes.some((node) => node.id === id)) delete paneLayout.nodeColors[id];
+  }
+  paneLayout.nodeShapes ||= {};
+  for (const id of Object.keys(paneLayout.nodeShapes)) {
+    if (!graph.nodes.some((node) => node.id === id)) delete paneLayout.nodeShapes[id];
   }
   paneLayout.edgeAnchors ||= {};
   for (const id of Object.keys(paneLayout.edgeAnchors)) {
@@ -232,6 +238,7 @@ function makeNode(node, pane, graph, parentElement = null) {
   element.className = `graph-node${node.parentId ? " nested" : ""}${state.selectedNodeId === node.id && pane === "toBe" ? " selected" : ""}${findingClass(findings)}`;
   element.dataset.id = node.id;
   element.dataset.nodeType = node.type;
+  element.dataset.shape = state.layout[pane].nodeShapes?.[node.id] || "rect";
   element.style.left = `${pos.x}px`;
   element.style.top = `${pos.y}px`;
   element.style.width = `${pos.width}px`;
@@ -330,8 +337,8 @@ function startDrag(event, nodeId, pane, element) {
   element.setPointerCapture(event.pointerId);
   const move = (moveEvent) => {
     const zoom = state.view[pane].zoom;
-    position.x = Math.max(0, Math.round(start.left + (moveEvent.clientX - start.x) / zoom));
-    position.y = Math.max(0, Math.round(start.top + (moveEvent.clientY - start.y) / zoom));
+    position.x = Math.max(0, snap(start.left + (moveEvent.clientX - start.x) / zoom));
+    position.y = Math.max(0, snap(start.top + (moveEvent.clientY - start.y) / zoom));
     element.style.left = `${position.x}px`;
     element.style.top = `${position.y}px`;
     fitAncestors(nodeId, pane, pane === "asIs" ? state.asIs : state.toBe);
@@ -369,8 +376,8 @@ function startResize(event, nodeId, pane, element, handle) {
         height: Math.max(bounds.height, childPosition.y + childPosition.height + CHILD_INSET),
       };
     }, minimum);
-    position.width = Math.max(MIN_NODE_WIDTH, childBounds.width, Math.round(start.width + (moveEvent.clientX - start.x) / zoom));
-    position.height = Math.max(MIN_NODE_HEIGHT, childBounds.height, Math.round(start.height + (moveEvent.clientY - start.y) / zoom));
+    position.width = Math.max(MIN_NODE_WIDTH, childBounds.width, snap(start.width + (moveEvent.clientX - start.x) / zoom));
+    position.height = Math.max(MIN_NODE_HEIGHT, childBounds.height, snap(start.height + (moveEvent.clientY - start.y) / zoom));
     element.style.width = `${position.width}px`;
     element.style.height = `${position.height}px`;
     fitAncestors(nodeId, pane, graph);
@@ -939,6 +946,7 @@ function openNodeInspector(id, pane = "toBe") {
     process: node.codeBinding.process, function: node.codeBinding.function,
     bindingStatus: node.codeBinding.status, bindingSource: node.codeBinding.source,
     width: position.width, height: position.height,
+    shape: state.layout[pane].nodeShapes?.[id] || "rect",
   };
   Object.entries(values).forEach(([name, value]) => { nodeForm.elements[name].value = value; });
   [...nodeForm.elements].forEach((control) => { control.disabled = pane === "asIs"; });
@@ -1015,6 +1023,10 @@ function syncNodeForm() {
     nodeForm.elements.bindingSource.value = node.codeBinding.source;
     nodeForm.elements.bindingStatus.value = node.codeBinding.status;
   }
+  state.layout.toBe.nodeShapes ||= {};
+  const shape = nodeForm.elements.shape.value;
+  if (shape && shape !== "rect") state.layout.toBe.nodeShapes[node.id] = shape;
+  else delete state.layout.toBe.nodeShapes[node.id];
   const position = state.layout.toBe.nodePositions[node.id];
   const minimum = estimatedContentSize(node, !node.parentId);
   position.width = Math.max(MIN_NODE_WIDTH, Number(nodeForm.elements.width.value) || position.width);

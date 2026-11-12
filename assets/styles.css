@@ -192,3 +192,26 @@ dialog p { margin: 0 0 16px; color: var(--muted); }
   .toolbar button { padding-inline: 8px; }
   .brand p { max-width: 280px; }
 }
+/* --- node shapes (layout-only; shaped nodes clip their own box) --- */
+.graph-node[data-shape="rounded"] { border-radius: 18px; }
+.graph-node[data-shape="ellipse"] { border-radius: 50%; }
+.graph-node[data-shape="diamond"], .graph-node[data-shape="hexagon"] { border-radius: 0; }
+.graph-node[data-shape="diamond"] { clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+.graph-node[data-shape="hexagon"] { clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+/* Center content inside clipped diamond/hexagon shapes so labels stay readable. */
+.graph-node[data-shape="diamond"]:not(.has-children) > .node-body,
+.graph-node[data-shape="hexagon"]:not(.has-children) > .node-body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 18%;
+  text-align: center;
+}
+/* Subtle editor grid; snapping is applied in app.js (GRID = 8). */
+.surface {
+  background-image: radial-gradient(circle, #e4e9ee 1px, transparent 1px);
+  background-size: 8px 8px;
+}
